@@ -8,6 +8,8 @@ import { ApiHandlerOptions, geminiDefaultModelId, GeminiModelId, geminiModels, M
 import { convertAnthropicMessageToGemini } from "../transform/gemini-format"
 import { ApiStream } from "../transform/stream"
 import { telemetryService } from "@services/posthog/telemetry/TelemetryService"
+import { shouldCacheContent, estimateTokenCount, calculateCachingSavings } from "../../utils/prompt-cache-optimizer"
+import { EnhancedRetryStrategy, PROVIDER_RETRY_CONFIGS } from "../../utils/enhanced-retry"
 
 // Define a default TTL for the cache (e.g., 15 minutes in seconds)
 const DEFAULT_CACHE_TTL_SECONDS = 900
@@ -102,19 +104,36 @@ export class GeminiHandler implements ApiHandler {
 		maxDelay: 15000,
 	})
 	async *createMessage(systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): ApiStream {
+		// Initialize enhanced retry strategy for Gemini
+		const { info } = this.getModel()
+		const retryStrategy = new EnhancedRetryStrategy({
+			...PROVIDER_RETRY_CONFIGS.gemini,
+			modelInfo: info,
+		})
+
 		const client = this.ensureClient()
-		const { id: modelId, info } = this.getModel()
+		const { id: modelId } = this.getModel()
 		const contents = messages.map(convertAnthropicMessageToGemini)
 
 		// Configure thinking budget if supported
 		const thinkingBudget = this.options.thinkingBudgetTokens ?? 0
 		const maxBudget = info.thinkingConfig?.maxBudget ?? 0
 
+		// Enhanced prompt caching for Gemini models
+		let enhancedSystemPrompt = systemPrompt
+		if (info.supportsPromptCache && systemPrompt) {
+			if (shouldCacheContent(systemPrompt, info)) {
+				// For Gemini, we can use context caching through the API
+				// Note: This requires the Gemini Context Caching API
+				console.log(`[Gemini] System instruction eligible for caching (${estimateTokenCount(systemPrompt)} tokens)`)
+			}
+		}
+
 		// Set up base generation config
 		const requestConfig: GenerateContentConfig = {
 			// Add base URL if configured
 			httpOptions: this.options.geminiBaseUrl ? { baseUrl: this.options.geminiBaseUrl } : undefined,
-			...{ systemInstruction: systemPrompt },
+			...{ systemInstruction: enhancedSystemPrompt },
 			// Set temperature (default to 0)
 			temperature: 0,
 		}

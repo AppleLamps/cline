@@ -9,6 +9,7 @@ import { createOpenRouterStream } from "../transform/openrouter-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { OpenRouterErrorResponse } from "./types"
 import { shouldSkipReasoningForModel } from "@utils/model-utils"
+import { getCostOptimizationConfig } from "@utils/cost-optimization"
 
 interface OpenRouterHandlerOptions {
 	openRouterApiKey?: string
@@ -17,15 +18,8 @@ interface OpenRouterHandlerOptions {
 	openRouterProviderSorting?: string
 	reasoningEffort?: string
 	thinkingBudgetTokens?: number
-}
-
-interface OpenRouterHandlerOptions {
-	openRouterApiKey?: string
-	openRouterModelId?: string
-	openRouterModelInfo?: ModelInfo
-	openRouterProviderSorting?: string
-	reasoningEffort?: string
-	thinkingBudgetTokens?: number
+	fallbackModels?: string[]
+	useAutoRouter?: boolean
 }
 
 export class OpenRouterHandler implements ApiHandler {
@@ -63,6 +57,29 @@ export class OpenRouterHandler implements ApiHandler {
 		const client = this.ensureClient()
 		this.lastGenerationId = undefined
 
+		// Apply automatic cost optimization if not explicitly configured
+		let fallbackModels = this.options.fallbackModels
+		let useAutoRouter = this.options.useAutoRouter
+		let providerSorting = this.options.openRouterProviderSorting
+
+		// Auto-generate cost optimization config if not provided
+		if (!fallbackModels && useAutoRouter === undefined) {
+			const hasImages = messages.some(
+				(msg) => Array.isArray(msg.content) && msg.content.some((content) => content.type === "image"),
+			)
+
+			const optimizationConfig = getCostOptimizationConfig(
+				this.options.openRouterModelId || openRouterDefaultModelId,
+				systemPrompt,
+				messages.length,
+				hasImages,
+			)
+
+			fallbackModels = optimizationConfig.fallbackModels
+			useAutoRouter = optimizationConfig.useAutoRouter
+			providerSorting = providerSorting || optimizationConfig.providerSorting
+		}
+
 		const stream = await createOpenRouterStream(
 			client,
 			systemPrompt,
@@ -70,7 +87,9 @@ export class OpenRouterHandler implements ApiHandler {
 			this.getModel(),
 			this.options.reasoningEffort,
 			this.options.thinkingBudgetTokens,
-			this.options.openRouterProviderSorting,
+			providerSorting,
+			fallbackModels,
+			useAutoRouter,
 		)
 
 		let didOutputUsage: boolean = false

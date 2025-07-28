@@ -4,6 +4,8 @@ import { withRetry } from "../retry"
 import { anthropicDefaultModelId, AnthropicModelId, anthropicModels, ApiHandlerOptions, ModelInfo } from "@shared/api"
 import { ApiHandler } from "../index"
 import { ApiStream } from "../transform/stream"
+import { enhanceAnthropicCaching, calculateCachingSavings } from "../../utils/prompt-cache-optimizer"
+import { EnhancedRetryStrategy, PROVIDER_RETRY_CONFIGS } from "../../utils/enhanced-retry"
 
 interface AnthropicHandlerOptions {
 	apiKey?: string
@@ -45,6 +47,29 @@ export class AnthropicHandler implements ApiHandler {
 		let stream: AnthropicStream<Anthropic.RawMessageStreamEvent>
 		const modelId = model.id
 
+		// Initialize enhanced retry strategy for Anthropic
+		const retryStrategy = new EnhancedRetryStrategy({
+			...PROVIDER_RETRY_CONFIGS.anthropicDirect,
+			modelInfo: model.info,
+		})
+
+		// Enhanced prompt caching for Anthropic models
+		let enhancedMessages = messages
+		if (model.info.supportsPromptCache) {
+			const systemMessage = { role: "system" as const, content: systemPrompt }
+			const allMessages = [systemMessage, ...messages]
+			const enhanced = enhanceAnthropicCaching(allMessages, model.info)
+			enhancedMessages = enhanced.filter((msg) => msg.role !== "system")
+
+			// Log potential savings
+			const savings = calculateCachingSavings(allMessages, model.info)
+			if (savings.potentialSavings > 0) {
+				console.log(
+					`[Anthropic] Potential caching savings: $${savings.potentialSavings.toFixed(4)} (${savings.cacheableTokens} tokens)`,
+				)
+			}
+		}
+
 		const budget_tokens = this.options.thinkingBudgetTokens || 0
 		const reasoningOn = (modelId.includes("3-7") || modelId.includes("4-")) && budget_tokens !== 0 ? true : false
 
@@ -81,7 +106,7 @@ export class AnthropicHandler implements ApiHandler {
 								cache_control: { type: "ephemeral" },
 							},
 						], // setting cache breakpoint for system prompt so new tasks can reuse it
-						messages: messages.map((message, index) => {
+						messages: enhancedMessages.map((message, index) => {
 							if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
 								return {
 									...message,
