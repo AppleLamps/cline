@@ -95,6 +95,39 @@ your-project/
 └── ...
 ```
 
+### How Cline uses rules in Plan & Act mode
+
+-   Cline combines **Global Rules** and **workspace rules** (including `AGENTS.md` fallbacks) and injects the enabled files into every request. The same guidance is present while brainstorming in **Plan Mode** and while editing/running commands in **Act Mode**, so keep both phases in mind when you write rules.
+-   Use the Rules popover toggles to disable noisy or irrelevant files before starting a task. This keeps the prompt lean and helps models focus on the constraints that matter for the current plan.
+-   When a plan feeds into Act Mode, the rules stay in context—perfect for reminding Cline which test suite to run, which packages are approved, or which directories are off-limits.
+
+### Project rule template that models follow well
+
+Organize rules so models can quickly route them to the right phase of work:
+
+-   **Project context**: tech stack, entry points, env names, critical services, external APIs to avoid without approval.
+-   **Planning guardrails (Plan Mode)**: what to clarify up front, how to structure proposed plans (checklist, sequence diagram, risk log), and when to pause for sign-off.
+-   **Execution guardrails (Act Mode)**: preferred commands (`npm run test:unit` first), code style references, migration/versioning rules, and safety rails (no `npm install -g`, no schema writes without confirmation).
+-   **Definition of done**: tests to run, artifacts to produce (changelog, screenshots), and verification steps.
+
+```markdown
+# Project Rules (Plan vs Act)
+## Context
+- Next.js app with Turborepo; CI fails if lint or unit tests fail.
+
+## Plan Mode
+- Propose a numbered plan with risks and fallback options.
+- Confirm data contracts with /docs/api/openapi.yaml before coding.
+
+## Act Mode
+- Prefer `npm run lint` then `npm run test:unit`.
+- Update docs in /docs/features when a UX flow changes.
+- Avoid writing to /scripts/migrations without explicit approval.
+
+## Definition of Done
+- Tests passing, docs updated, note any trade-offs.
+```
+
 ### Tips for Writing Effective Cline Rules
 
 -   Be Clear and Concise: Use simple language and avoid ambiguity.
